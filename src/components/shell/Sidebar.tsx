@@ -408,24 +408,26 @@ function AppNavItem({
           aria-label={tip}
           aria-current={selected ? "page" : undefined}
           className={cn(
-            "mx-auto flex h-8 w-12 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-subtle",
-            selected && "bg-selected hover:bg-selected",
+            "sidebar-nav-item sidebar-nav-item-collapsed mx-auto flex h-8 w-12 shrink-0 items-center rounded-control hover:before:bg-subtle",
+            selected && "before:bg-selected hover:before:bg-selected",
           )}
         >
-          <span className="relative flex">
-            <AppGlyph app={app} size={20} badgeClassName={badgeBg} />
-            {marker && (
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "absolute -end-[7px] -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2",
-                  selected ? "border-selected" : "border-sidebar",
-                  marker.className,
-                )}
-              >
-                <marker.icon className="h-2 w-2" strokeWidth={3} />
-              </span>
-            )}
+          <span className="sidebar-nav-item-content">
+            <span className="relative flex">
+              <AppGlyph app={app} size={20} badgeClassName={badgeBg} />
+              {marker && (
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "absolute -end-[7px] -top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2",
+                    selected ? "border-selected" : "border-sidebar",
+                    marker.className,
+                  )}
+                >
+                  <marker.icon className="h-2 w-2" strokeWidth={3} />
+                </span>
+              )}
+            </span>
           </span>
         </button>
       </HoverTip>
@@ -438,32 +440,34 @@ function AppNavItem({
       onClick={onSelect}
       aria-current={selected ? "page" : undefined}
       className={cn(
-        "mx-2 flex h-7 w-[184px] shrink-0 items-center gap-2 rounded-control px-2 text-start transition-colors hover:bg-subtle",
-        selected && "bg-selected font-medium hover:bg-selected",
+        "sidebar-nav-item mx-2 flex h-7 w-[184px] shrink-0 items-center gap-2 rounded-control px-2 text-start hover:before:bg-subtle",
+        selected && "font-medium before:bg-selected hover:before:bg-selected",
       )}
     >
-      <AppGlyph app={app} size={16} badgeClassName={badgeBg} />
-      <span className="min-w-0 flex-1 truncate">{name}</span>
-      {status.alert ? (
-        <span
-          role="img"
-          aria-label={t("nav.needsAttention")}
-          className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger"
-        />
-      ) : (
-        // 选中的应用不再显示模式标签：页头下面的模式行已经写明
-        tag &&
-        !selected && (
+      <span className="sidebar-nav-item-content">
+        <AppGlyph app={app} size={16} badgeClassName={badgeBg} />
+        <span className="min-w-0 flex-1 truncate">{name}</span>
+        {status.alert ? (
           <span
-            className={cn(
-              "h-[18px] whitespace-nowrap rounded-full px-1.5 text-badge leading-[18px]",
-              tag.className,
-            )}
-          >
-            {tag.label}
-          </span>
-        )
-      )}
+            role="img"
+            aria-label={t("nav.needsAttention")}
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger"
+          />
+        ) : (
+          // 选中的应用不再显示模式标签：页头下面的模式行已经写明
+          tag &&
+          !selected && (
+            <span
+              className={cn(
+                "h-[18px] whitespace-nowrap rounded-full px-1.5 text-badge leading-[18px]",
+                tag.className,
+              )}
+            >
+              {tag.label}
+            </span>
+          )
+        )}
+      </span>
     </button>
   );
 }
@@ -557,11 +561,11 @@ function NavItem({
           aria-label={title ?? accessibleName}
           aria-current={selected ? "page" : undefined}
           className={cn(
-            "mx-auto flex h-8 w-12 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-subtle",
-            selected && "bg-selected hover:bg-selected",
+            "sidebar-nav-item sidebar-nav-item-collapsed mx-auto flex h-8 w-12 shrink-0 items-center rounded-control hover:before:bg-subtle",
+            selected && "before:bg-selected hover:before:bg-selected",
           )}
         >
-          {glyph(20)}
+          <span className="sidebar-nav-item-content">{glyph(20)}</span>
         </button>
       </HoverTip>
     );
@@ -579,32 +583,34 @@ function NavItem({
         onClick={onClick}
         aria-current={selected ? "page" : undefined}
         className={cn(
-          "flex h-7 shrink-0 items-center gap-2 rounded-control px-2 text-start transition-colors hover:bg-subtle",
+          "sidebar-nav-item flex h-7 shrink-0 items-center gap-2 rounded-control px-2 text-start hover:before:bg-subtle",
           compact ? "min-w-0 flex-1" : "mx-2 w-[184px]",
-          selected && "bg-selected font-medium hover:bg-selected",
+          selected && "font-medium before:bg-selected hover:before:bg-selected",
         )}
       >
-        {glyph(18)}
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-        {trailing && (
-          <span className="shrink-0 text-caption tabular-nums text-fg-3">
-            {trailing}
-          </span>
-        )}
-        {alert && (
-          <span
-            role="img"
-            aria-label={alert}
-            title={alert}
-            className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger"
-          />
-        )}
-        {dot && endDot && (
-          <span
-            aria-hidden="true"
-            className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotFill)}
-          />
-        )}
+        <span className="sidebar-nav-item-content">
+          {glyph(18)}
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+          {trailing && (
+            <span className="shrink-0 text-caption tabular-nums text-fg-3">
+              {trailing}
+            </span>
+          )}
+          {alert && (
+            <span
+              role="img"
+              aria-label={alert}
+              title={alert}
+              className="h-1.5 w-1.5 shrink-0 rounded-full bg-danger"
+            />
+          )}
+          {dot && endDot && (
+            <span
+              aria-hidden="true"
+              className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotFill)}
+            />
+          )}
+        </span>
       </button>
     </HoverTip>
   );
@@ -649,10 +655,16 @@ function SettingsDirectory({
         <button
           type="button"
           onClick={onExitSettings}
-          className="mx-2 flex h-7 w-[184px] shrink-0 items-center gap-2 rounded-control px-2 text-start text-fg-2 transition-colors hover:bg-subtle hover:text-fg-1"
+          className="sidebar-nav-item mx-2 flex h-7 w-[184px] shrink-0 items-center gap-2 rounded-control px-2 text-start text-fg-2 hover:text-fg-1 hover:before:bg-subtle"
         >
-          <ArrowLeft className="h-4 w-4" strokeWidth={1.5} aria-hidden="true" />
-          {t("nav.back")}
+          <span className="sidebar-nav-item-content">
+            <ArrowLeft
+              className="h-4 w-4 shrink-0"
+              strokeWidth={1.5}
+              aria-hidden="true"
+            />
+            <span className="min-w-0 flex-1 truncate">{t("nav.back")}</span>
+          </span>
         </button>
       )}
       {!collapsed && (

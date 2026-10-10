@@ -231,6 +231,76 @@
    统一画成 16px、1.5px border-strong 描边；选中 = 主题色底 + 反色勾（单选 = 粗主题色圈）。
    原生 <input type="checkbox|radio"> 加 ui-checkbox / ui-radio 即可，Checkbox 组件已经带上。 */
 @layer components {
+  /* 背景只增加悬停高度，内容独立缩放；保留原始宽度与布局尺寸。 */
+  .sidebar-nav-item {
+    --sidebar-item-hover-scale: 1.2;
+    position: relative;
+    isolation: isolate;
+    transition: color 150ms;
+  }
+
+  .sidebar-nav-item::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    transition:
+      transform 180ms cubic-bezier(0.2, 0, 0, 1),
+      background-color 150ms;
+  }
+
+  .sidebar-nav-item-content {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    align-items: center;
+    justify-content: inherit;
+    gap: inherit;
+    transform-origin: left center;
+    transition:
+      width 180ms cubic-bezier(0.2, 0, 0, 1),
+      transform 180ms cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  .sidebar-nav-item-content:dir(rtl) {
+    transform-origin: right center;
+  }
+
+  .sidebar-nav-item-collapsed {
+    --sidebar-item-hover-scale: 1.25;
+  }
+
+  .sidebar-nav-item-collapsed > .sidebar-nav-item-content {
+    justify-content: center;
+    /* 图标轨不需要收窄文字布局：固定宽度、绕中心缩放，避免过渡中中心漂移。 */
+    transform-origin: center;
+    transition-property: transform;
+    /* 点击与悬停始终由原尺寸按钮接收，缩放后的装饰内容不改变命中区域。 */
+    pointer-events: none;
+  }
+
+  @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+    .sidebar-nav-item:hover {
+      z-index: 1;
+    }
+
+    .sidebar-nav-item:hover::before {
+      transform: scaleY(var(--sidebar-item-hover-scale));
+    }
+
+    .sidebar-nav-item:hover > .sidebar-nav-item-content {
+      transform: scale(var(--sidebar-item-hover-scale));
+    }
+
+    .sidebar-nav-item:not(.sidebar-nav-item-collapsed):hover
+      > .sidebar-nav-item-content {
+      /* 缩放前收窄内容布局，让放大后的文字、角标仍落在原有内边距内。 */
+      width: calc(100% / var(--sidebar-item-hover-scale));
+    }
+  }
+
   .ui-checkbox,
   .ui-radio {
     appearance: none;
@@ -447,6 +517,12 @@ html[data-window-active="false"] .status-heartbeat {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .sidebar-nav-item,
+  .sidebar-nav-item::before,
+  .sidebar-nav-item-content {
+    transition: none;
+  }
+
   .status-heartbeat {
     opacity: 1;
     transition-property: color;

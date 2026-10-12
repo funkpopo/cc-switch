@@ -12,6 +12,7 @@ const toastWarningMock = vi.fn();
 
 vi.mock("sonner", () => ({
   toast: {
+    dismiss: vi.fn(),
     success: (...args: unknown[]) => toastSuccessMock(...args),
     error: (...args: unknown[]) => toastErrorMock(...args),
     info: (...args: unknown[]) => toastInfoMock(...args),
@@ -200,7 +201,14 @@ describe("useProviderActions", () => {
     expect(settingsApiApplyMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalledWith(
       "切换成功，请重启客户端以生效",
-      { closeButton: true },
+      expect.objectContaining({
+        closeButton: true,
+        duration: 8000,
+        action: {
+          label: "proxy.stackMode.codexStale.restart",
+          onClick: expect.any(Function),
+        },
+      }),
     );
   });
 

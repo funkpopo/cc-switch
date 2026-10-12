@@ -1,12 +1,6 @@
-import { useEffect, useId, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { toast } from "@/lib/toast";
-import {
-  proxyKeys,
-  useAcknowledgeCodexStaleClients,
-  useRestartCodexAppServerDaemon,
-} from "@/lib/query/proxy";
+import { Notice } from "@/components/ui/notice";
+import { useAcknowledgeCodexStaleClients } from "@/lib/query/proxy";
 import type { CodexStaleClients } from "@/types/proxy";
 
 interface CodexStaleClientsNoticeProps {
@@ -15,111 +9,45 @@ interface CodexStaleClientsNoticeProps {
 }
 
 /**
- * 把 CLI 守护进程的重启入口放在通知里。通知中说明会中断任务，只有点击才执行。
- * 使用 Sonner 的有限时长和悬停计时：移出后继续倒计时，点击后立即收起。
- * 自动消失只隐藏这一代提示，不把它当作用户确认客户端已更新。
+ * Codex 客户端可能缓存着旧账号或模型列表（模型目录只在启动时读，切换账号或直连、路由、聚合
+ * 模式后都会变）。这里只显示状态，CLI 重启入口在切换成功通知中。看不到桌面版、编辑器插件
+ * 进程时（Windows），只能说「可能」，关掉提示时让后端记下现在这份，同一份不再提示。
  */
 export function CodexStaleClientsNotice({
-  staleClients: { daemon, others, auth, unverified },
+  staleClients,
   onDismiss,
 }: CodexStaleClientsNoticeProps) {
   const { t } = useTranslation();
-  const id = useId();
-  const queryClient = useQueryClient();
-  const { mutate: restart } = useRestartCodexAppServerDaemon();
-  const { mutate: acknowledge } = useAcknowledgeCodexStaleClients();
-  const onDismissRef = useRef(onDismiss);
-  useEffect(() => {
-    onDismissRef.current = onDismiss;
-  }, [onDismiss]);
+  const acknowledge = useAcknowledgeCodexStaleClients();
+  const dismiss = () => {
+    if (staleClients.unverified) acknowledge.mutate();
+    onDismiss?.();
+  };
 
-  useEffect(() => {
-    let active = true;
-    let dismissed = false;
-    const dismiss = (explicit = false) => {
-      if (!active || dismissed) return;
-      dismissed = true;
-      if (explicit && unverified) acknowledge();
-      onDismissRef.current?.();
-    };
-
-    // 全局 Toaster 在 App 后挂载；等本轮 effects 完成，避免缓存命中时首条通知丢失。
-    queueMicrotask(() => {
-      if (!active) return;
-      toast.warning(
-        t(
-          unverified
-            ? "proxy.stackMode.codexStale.unverifiedTitle"
-            : auth
-              ? "proxy.stackMode.codexStale.authTitle"
-              : "proxy.stackMode.codexStale.title",
-        ),
-        {
-          id,
-          duration: 8000,
-          closeButton: true,
-          description: (
-            <>
-              {daemon && (
-                <span className="block">
-                  {t("proxy.stackMode.codexStale.restartWarning")}
-                </span>
-              )}
-              {others && (
-                <span className="block">
-                  {t("proxy.stackMode.codexStale.others")}
-                </span>
-              )}
-              {unverified && (
-                <span className="block">
-                  {t("proxy.stackMode.codexStale.unverifiedHint")}
-                </span>
-              )}
-            </>
-          ),
-          action: daemon
-            ? {
-                label: t("proxy.stackMode.codexStale.restart"),
-                onClick: (event) => {
-                  if (!active || dismissed) return;
-                  // 新目录的通知可能在上一次重启期间出现；跨组件挂载也只重启一次。
-                  if (
-                    queryClient.isMutating({
-                      mutationKey: proxyKeys.codexRestart,
-                    }) > 0
-                  ) {
-                    event.preventDefault();
-                    toast.info(t("proxy.stackMode.codexStale.restarting"));
-                    return;
-                  }
-                  dismiss();
-                  toast.dismiss(id);
-                  restart();
-                },
-              }
-            : undefined,
-          onDismiss: () => dismiss(true),
-          onAutoClose: () => dismiss(),
-        },
-      );
-    });
-
-    return () => {
-      // 卸载、切换页面、切换配置时撤掉旧按钮，不确认或隐藏下一代提示。
-      active = false;
-      toast.dismiss(id);
-    };
-  }, [
-    id,
-    t,
-    daemon,
-    others,
-    auth,
-    unverified,
-    restart,
-    acknowledge,
-    queryClient,
-  ]);
-
-  return null;
+  return (
+    <Notice
+      tone="warning"
+      title={t(
+        staleClients.unverified
+          ? "proxy.stackMode.codexStale.unverifiedTitle"
+          : staleClients.auth
+            ? "proxy.stackMode.codexStale.authTitle"
+            : "proxy.stackMode.codexStale.title",
+      )}
+      onDismiss={onDismiss || staleClients.unverified ? dismiss : undefined}
+      dismissLabel={t("common.close")}
+    >
+      {staleClients.daemon && (
+        <span className="block">{t("proxy.stackMode.codexStale.daemon")}</span>
+      )}
+      {staleClients.others && (
+        <span className="block">{t("proxy.stackMode.codexStale.others")}</span>
+      )}
+      {staleClients.unverified && (
+        <span className="block">
+          {t("proxy.stackMode.codexStale.unverifiedHint")}
+        </span>
+      )}
+    </Notice>
+  );
 }

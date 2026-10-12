@@ -27,6 +27,7 @@ const skillsPanelMocks = vi.hoisted(() => ({
 
 vi.mock("sonner", () => ({
   toast: {
+    dismiss: vi.fn(),
     success: (...args: unknown[]) => toastSuccessMock(...args),
     error: (...args: unknown[]) => toastErrorMock(...args),
   },

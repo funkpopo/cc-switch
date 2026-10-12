@@ -30,6 +30,7 @@ import { openclawKeys } from "@/hooks/useOpenClaw";
 import { supportsOfficialProxyTakeover } from "@/utils/providerCapabilities";
 import { getRoutingReason } from "@/utils/routingReason";
 import { logFrontendInfo } from "@/lib/frontendLogger";
+import { useCodexSwitchNotification } from "@/hooks/useCodexSwitchNotification";
 
 /**
  * Hook for managing provider actions (add, update, delete, switch)
@@ -46,6 +47,7 @@ export function useProviderActions(
   const updateProviderMutation = useUpdateProviderMutation(activeApp);
   const deleteProviderMutation = useDeleteProviderMutation(activeApp);
   const switchProviderMutation = useSwitchProviderMutation(activeApp);
+  const showCodexSwitchNotification = useCodexSwitchNotification();
 
   // Claude 插件同步逻辑
   const syncClaudePlugin = useCallback(
@@ -279,15 +281,25 @@ export function useProviderActions(
             messageKey = "notifications.addToConfigSuccess";
             defaultMessage = "已添加到配置";
           }
-          toast.success(t(messageKey, { defaultValue: defaultMessage }), {
-            closeButton: true,
-          });
+          const message = t(messageKey, { defaultValue: defaultMessage });
+          if (activeApp === "codex") {
+            showCodexSwitchNotification(message);
+          } else {
+            toast.success(message, { closeButton: true });
+          }
         }
       } catch {
         // 错误提示由 mutation 处理
       }
     },
-    [switchProviderMutation, syncClaudePlugin, activeApp, isProxyTakeover, t],
+    [
+      switchProviderMutation,
+      syncClaudePlugin,
+      activeApp,
+      isProxyTakeover,
+      showCodexSwitchNotification,
+      t,
+    ],
   );
 
   // 删除供应商

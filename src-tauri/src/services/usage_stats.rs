@@ -2904,6 +2904,11 @@ fn strip_reasoning_effort_suffix(model_id: &str) -> Option<String> {
 }
 
 fn should_try_pricing_prefix_match(model_id: &str) -> bool {
+    // Kimi Code 的移动别名，指向的模型会换代；前缀兜底会落到 2 倍价的 -highspeed 档
+    if model_id == "kimi-for-coding" {
+        return false;
+    }
+
     let dash_count = model_id.matches('-').count();
 
     if model_id.starts_with("claude-") {
@@ -5814,6 +5819,31 @@ mod tests {
         let (input, output, ..) = row.unwrap();
         assert_eq!(input, "0.84");
         assert_eq!(output, "4.2");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_pricing_resolves_kimi_code_bare_models_but_not_moving_alias() -> Result<(), AppError> {
+        // Kimi Code 会话导入按套餐里的裸名落库；查不到价时成本显示 $0。
+        let db = Database::memory()?;
+        let conn = lock_conn!(db.conn);
+
+        for (model_id, input, output) in [
+            ("k3", "3.00", "15.00"),
+            ("k3-256k", "3.00", "15.00"),
+            ("k3.1-pro", "2.00", "10.00"),
+            ("k3.1-pro-highspeed", "4.00", "20.00"),
+            ("kimi-for-coding-highspeed", "1.90", "8.00"),
+        ] {
+            let (got_input, got_output, ..) = find_model_pricing_row(&conn, model_id)?
+                .unwrap_or_else(|| panic!("{model_id} 应命中内置定价"));
+            assert_eq!((got_input.as_str(), got_output.as_str()), (input, output));
+        }
+
+        // 移动别名在官方给出指向模型的价格前保持不定价，也不能前缀落到 -highspeed 档
+        assert!(find_model_pricing_row(&conn, "kimi-for-coding")?.is_none());
+        assert!(find_model_pricing_row(&conn, "kimi-code/kimi-for-coding")?.is_none());
 
         Ok(())
     }

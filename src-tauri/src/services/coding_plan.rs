@@ -31,7 +31,7 @@ enum CodingPlanProvider {
 
 fn detect_provider(base_url: &str) -> Option<CodingPlanProvider> {
     let url = base_url.to_lowercase();
-    if url.contains("api.kimi.com/coding") {
+    if url.contains("api.kimi.com/coding") || url.contains("api.kimi.ai/coding") {
         Some(CodingPlanProvider::Kimi)
     } else if url.contains("open.bigmodel.cn") || url.contains("bigmodel.cn") {
         Some(CodingPlanProvider::ZhipuCn)
@@ -151,8 +151,18 @@ impl CodingPlanOutcome {
 
 // ── Kimi For Coding ─────────────────────────────────────────
 
-async fn query_kimi(api_key: &str) -> Result<SubscriptionQuota, String> {
-    query_kimi_at("https://api.kimi.com/coding/v1", api_key).await
+/// 国内版（api.kimi.com）与海外版（api.kimi.ai）的账号互不相通，额度接口跟着
+/// 用户自己的编程端点走，与官方登录 `KimiRegion` 的 base_url 一致。
+fn kimi_quota_base(base_url: &str) -> &'static str {
+    if base_url.to_lowercase().contains("api.kimi.ai/coding") {
+        "https://api.kimi.ai/coding/v1"
+    } else {
+        "https://api.kimi.com/coding/v1"
+    }
+}
+
+async fn query_kimi(base_url: &str, api_key: &str) -> Result<SubscriptionQuota, String> {
+    query_kimi_at(kimi_quota_base(base_url), api_key).await
 }
 
 /// `base_url` is the Kimi Code API root (`https://api.kimi.ai/coding/v1` for
@@ -1899,7 +1909,7 @@ pub(crate) async fn query_coding_plan(
         CodingPlanProvider::ZhipuCn | CodingPlanProvider::ZhipuEn => {
             return query_zhipu(base_url, api_key).await
         }
-        CodingPlanProvider::Kimi => query_kimi(api_key).await,
+        CodingPlanProvider::Kimi => query_kimi(base_url, api_key).await,
         CodingPlanProvider::MiniMaxCn => query_minimax(api_key, true).await,
         CodingPlanProvider::MiniMaxEn => query_minimax(api_key, false).await,
         CodingPlanProvider::ZenMux => query_zenmux(base_url, api_key).await,

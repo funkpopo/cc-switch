@@ -49,6 +49,8 @@ const TAB_KEY = "cc-switch-tray-tab";
 const LANGUAGE_KEY = "language";
 /** 约能放下 6 个应用行，再多就在列表里滚动 */
 const MAIN_MAX_HEIGHT = 480;
+/** 多档账号额度需要更多纵向空间；仍受当前屏幕可用高度限制。 */
+const ACCOUNT_QUOTA_MAX_HEIGHT = 620;
 /** 使用固定画布时，窗口在一次弹出里的最大高度 */
 const CANVAS_MAX_HEIGHT = 760;
 /** 分开摆时窗口四周留的透明边距，给卡片的阴影（系统窗口阴影已关掉） */
@@ -112,6 +114,7 @@ export function formatResetIn(
   iso: string,
   now: Date,
   texts: PanelTexts,
+  short = false,
 ): string | null {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime()) || at <= now) return null;
@@ -136,10 +139,8 @@ export function formatResetIn(
             minutes > 0 && unit(texts.durationMinutes, minutes),
           ]
         : [unit(texts.durationMinutes, minutes)];
-  return texts.resetsIn.replace(
-    "{when}",
-    parts.filter(Boolean).join(texts.durationSep),
-  );
+  const duration = parts.filter(Boolean).join(texts.durationSep);
+  return short ? duration : texts.resetsIn.replace("{when}", duration);
 }
 
 /** 只给数值上绿色（「余额 82.10 CNY」里的金额），和主界面 `TONE_TEXT.normal` 同色。 */
@@ -165,20 +166,26 @@ function QuotaBlock({
   quota,
   texts,
   compact = false,
+  shortReset = false,
 }: {
   quota: PanelQuota;
   texts: PanelTexts;
   /** 子面板里：最多两档 */
   compact?: boolean;
+  shortReset?: boolean;
 }) {
   if (quota.lines.length === 0 && !quota.note && quota.resetCredits == null) {
     return null;
   }
   const now = new Date();
-  const lines = quota.lines.slice(0, compact ? 2 : 3).map((line) => ({
-    ...line,
-    when: line.resetsAt ? formatResetIn(line.resetsAt, now, texts) : null,
-  }));
+  const lines = (compact ? quota.lines.slice(0, 2) : quota.lines).map(
+    (line) => ({
+      ...line,
+      when: line.resetsAt
+        ? formatResetIn(line.resetsAt, now, texts, shortReset)
+        : null,
+    }),
+  );
   // 各档共用一张网格（文字 | 进度条 | 多久重置），进度条的起止才对得齐；
   // 整块都没有重置时间时不留第三列，免得右边空出一截间距。
   const hasWhen = lines.some((line) => line.when);
@@ -221,7 +228,14 @@ function QuotaBlock({
               </span>
             )}
             {hasWhen && (
-              <span className="justify-self-end whitespace-nowrap text-[10.5px] tabular-nums text-muted-foreground">
+              <span
+                title={
+                  line.resetsAt
+                    ? (formatResetIn(line.resetsAt, now, texts) ?? undefined)
+                    : undefined
+                }
+                className="justify-self-end whitespace-nowrap text-[10.5px] tabular-nums text-muted-foreground"
+              >
                 {line.when}
               </span>
             )}
@@ -269,6 +283,14 @@ function AppRow({
   onOpen: () => void;
 }) {
   const Chevron = side === "left" ? ChevronLeft : ChevronRight;
+  const accountQuotas =
+    app.app === "agy" || app.app === "kimi"
+      ? app.rows.flatMap(({ id, provider }) =>
+          provider?.quota
+            ? [{ id, name: provider.name, quota: provider.quota }]
+            : [],
+        )
+      : [];
   return (
     <button
       type="button"
@@ -326,6 +348,14 @@ function AppRow({
           <QuotaBlock quota={app.quota} texts={texts} />
         </span>
       )}
+      {accountQuotas.map(({ id, name, quota }) => (
+        <span key={id} className="col-span-2 col-start-2 min-w-0 pt-1.5">
+          <span className="block truncate text-xs text-muted-foreground">
+            {name}
+          </span>
+          <QuotaBlock quota={quota} texts={texts} shortReset />
+        </span>
+      ))}
     </button>
   );
 }
@@ -988,12 +1018,19 @@ export function TrayPanel() {
     };
   };
 
+  const mainHeightLimit = apps.some(
+    (app) =>
+      (app.app === "agy" || app.app === "kimi") &&
+      app.rows.some((row) => row.provider?.quota),
+  )
+    ? ACCOUNT_QUOTA_MAX_HEIGHT
+    : MAIN_MAX_HEIGHT;
   const mainMaxHeight = useMemo(() => {
-    if (!placement) return MAIN_MAX_HEIGHT / coordinateScale;
+    if (!placement) return mainHeightLimit / coordinateScale;
     const room =
       placement.edge === "top" ? placement.boundsBottom : -placement.boundsTop;
-    return Math.max(0, Math.min(MAIN_MAX_HEIGHT / coordinateScale, room));
-  }, [placement, coordinateScale]);
+    return Math.max(0, Math.min(mainHeightLimit / coordinateScale, room));
+  }, [placement, coordinateScale, mainHeightLimit]);
   const subMaxHeight = useMemo(() => {
     if (!placement) return SUB_MAX_HEIGHT / coordinateScale;
     const room =

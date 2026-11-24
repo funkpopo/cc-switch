@@ -1,14 +1,14 @@
 //! 托盘菜单（v7）
 //!
 //! 结构：问题区（出问题才有）→ 反馈行（托盘里刚做完要重启才生效的操作）→ 打开 CC Switch →
-//! 切换式应用的子菜单（Claude Code、Claude Desktop、Codex、Gemini CLI、Grok Build；在「应用」页
-//! 隐藏的不列）→ 轻量模式 → 打开官方网站 / 退出 CC Switch。累加式应用（OpenCode / OpenClaw /
-//! Hermes / Pi / MiniMax Code）不进托盘；托盘里不切模式、不启停路由服务。
+//! 可见应用的子菜单（顺序跟随「应用」页）→ 轻量模式 → 打开官方网站 / 退出 CC Switch。
+//! 切换式应用切换供应商，共存式应用添加供应商，Antigravity 卡片打开应用页。
+//! 快捷面板还逐卡展示 Antigravity / Kimi 账号额度；托盘不切模式、不启停路由服务。
 //!
 //! 分三层：`collect_*` 从数据库和设备状态读出快照，`build_menu_model` 把快照变成纯数据的菜单
 //! 模型（单测覆盖这一层），`attach_*` 把模型挂到 Tauri 原生菜单上。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -52,6 +52,29 @@ pub const TRAY_APPS: [AppType; 14] = [
     AppType::Agy,
     AppType::Omp,
 ];
+
+/// 与前端 `orderAppIds` 一致：保留用户顺序，新应用插在默认前一个应用后面。
+fn ordered_tray_apps(saved: Option<&[String]>) -> Vec<&'static AppType> {
+    let mut ordered = Vec::new();
+    for id in saved.unwrap_or_default() {
+        if let Some(app) = TRAY_APPS.iter().find(|app| app.as_str() == id) {
+            if !ordered.contains(&app) {
+                ordered.push(app);
+            }
+        }
+    }
+    for (index, app) in TRAY_APPS.iter().enumerate() {
+        if ordered.contains(&app) {
+            continue;
+        }
+        let previous = TRAY_APPS[..index]
+            .iter()
+            .rev()
+            .find_map(|previous| ordered.iter().position(|candidate| *candidate == previous));
+        ordered.insert(previous.map_or(0, |index| index + 1), app);
+    }
+    ordered
+}
 
 /// 应用全称（产品名，不翻译）。用全称是为了把 Claude Code 和 Claude Desktop 分开。
 fn app_display_name(app: &AppType) -> &'static str {
@@ -154,6 +177,7 @@ pub struct TrayTexts {
     pub tier_gemini_flash: &'static str,
     pub tier_gemini_flash_lite: &'static str,
     pub tier_premium: &'static str,
+    pub tier_agy: [&'static str; 5],
     pub tier_left: &'static str,
     pub tier_used: &'static str,
     pub tier_used_up: &'static str,
@@ -261,6 +285,7 @@ impl TrayTexts {
                 tier_gemini_flash: "Flash",
                 tier_gemini_flash_lite: "Flash Lite",
                 tier_premium: "Credits",
+                tier_agy: ["Gemini 5-hour", "Gemini weekly", "Argon weekly", "Claude/GPT 5-hour", "Claude/GPT weekly"],
                 tier_left: "{label} {value}% left",
                 tier_used: "{label} {value}% used",
                 tier_used_up: "{label} used up",
@@ -337,6 +362,7 @@ impl TrayTexts {
                 texts.reset_on_date = "{label} kotası {when} tarihinde sıfırlanır";
                 texts.reset_at_time = "{label} kotası {when} saatinde sıfırlanır";
                 texts.date_format = "%d.%m";
+                texts.tier_agy = ["Gemini 5 saatlik", "Gemini haftalık", "Argon haftalık", "Claude/GPT 5 saatlik", "Claude/GPT haftalık"];
                 texts
             }
             "ja" => Self {
@@ -388,6 +414,7 @@ impl TrayTexts {
                 tier_gemini_flash: "Flash",
                 tier_gemini_flash_lite: "Flash Lite",
                 tier_premium: "Credits",
+                tier_agy: ["Gemini 5時間", "Gemini 週間", "Argon 週間", "Claude/GPT 5時間", "Claude/GPT 週間"],
                 tier_left: "{label} 残り {value}%",
                 tier_used: "{label} 使用済み {value}%",
                 tier_used_up: "{label} 使い切り",
@@ -449,6 +476,7 @@ impl TrayTexts {
                 tier_gemini_flash: "Flash",
                 tier_gemini_flash_lite: "Flash Lite",
                 tier_premium: "Credits",
+                tier_agy: ["Gemini 5 小時", "Gemini 每週", "Argon 每週", "Claude/GPT 5 小時", "Claude/GPT 每週"],
                 tier_left: "{labelSp}剩餘 {value}%",
                 tier_used: "{labelSp}已用 {value}%",
                 tier_used_up: "{labelSp}已用完",
@@ -510,6 +538,7 @@ impl TrayTexts {
                 tier_gemini_flash: "Flash",
                 tier_gemini_flash_lite: "Flash Lite",
                 tier_premium: "Credits",
+                tier_agy: ["Gemini 5 小时", "Gemini 每周", "Argon 每周", "Claude/GPT 5 小时", "Claude/GPT 每周"],
                 tier_left: "{labelSp}剩余 {value}%",
                 tier_used: "{labelSp}已用 {value}%",
                 tier_used_up: "{labelSp}已用完",
@@ -594,6 +623,7 @@ enum TierGroup {
     GeminiFlash,
     GeminiFlashLite,
     Premium,
+    Agy(usize),
 }
 
 const TIER_GROUPS: &[(TierGroup, &[&str])] = {
@@ -616,6 +646,26 @@ const TIER_GROUPS: &[(TierGroup, &[&str])] = {
         (TierGroup::GeminiFlash, &[s::TIER_GEMINI_FLASH]),
         (TierGroup::GeminiFlashLite, &[s::TIER_GEMINI_FLASH_LITE]),
         (TierGroup::Premium, &["premium"]),
+        (
+            TierGroup::Agy(0),
+            &[crate::services::subscription_agy::TIER_AGY_GEMINI_FIVE_HOUR],
+        ),
+        (
+            TierGroup::Agy(1),
+            &[crate::services::subscription_agy::TIER_AGY_GEMINI_WEEKLY],
+        ),
+        (
+            TierGroup::Agy(2),
+            &[crate::services::subscription_agy::TIER_AGY_GEMINI_ARGON_WEEKLY],
+        ),
+        (
+            TierGroup::Agy(3),
+            &[crate::services::subscription_agy::TIER_AGY_THIRD_PARTY_FIVE_HOUR],
+        ),
+        (
+            TierGroup::Agy(4),
+            &[crate::services::subscription_agy::TIER_AGY_THIRD_PARTY_WEEKLY],
+        ),
     ]
 };
 
@@ -633,6 +683,7 @@ fn tier_label(texts: &TrayTexts, group: TierGroup, tier_name: &str) -> &'static 
         TierGroup::GeminiFlash => texts.tier_gemini_flash,
         TierGroup::GeminiFlashLite => texts.tier_gemini_flash_lite,
         TierGroup::Premium => texts.tier_premium,
+        TierGroup::Agy(index) => texts.tier_agy[index],
     }
 }
 
@@ -973,11 +1024,13 @@ fn provider_uses_official_subscription(provider: &Provider) -> bool {
         .unwrap_or(false)
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum TrayUsageSource {
     ManagedCodex(String),
     /// 绑了账号的 Claude 官方卡：按绑定的账号取，不读客户端默认登录的应用级缓存。
     ClaudeAccount(String),
+    AgyAccount(String),
+    KimiAccount(String),
     /// 客户端自己登录的官方订阅：和供应商卡片读写同一份应用级订阅缓存。
     Subscription,
     Script,
@@ -985,6 +1038,27 @@ enum TrayUsageSource {
 
 /// Keep the tray's refresh and display paths on the same credentials and toggle.
 fn tray_usage_source(app_type: &AppType, provider: &Provider) -> Option<TrayUsageSource> {
+    // Kimi 官方卡就是账号；API Key 卡继续走用量脚本。
+    if *app_type == AppType::Kimi
+        && crate::kimi_config::is_official_provider(&provider.settings_config)
+    {
+        return Some(TrayUsageSource::KimiAccount(provider.id.clone()));
+    }
+    if *app_type == AppType::Agy
+        && crate::services::provider::agy_direct::is_official(provider)
+        && crate::services::agy_account::keychain::supported()
+        && provider_uses_official_subscription(provider)
+    {
+        if let Some(account_id) = provider
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.managed_account_id_for("agy_oauth"))
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty())
+        {
+            return Some(TrayUsageSource::AgyAccount(account_id));
+        }
+    }
     if *app_type == AppType::Codex {
         if let Some(account_id) = managed_codex_account_id(provider) {
             // Match ProviderCard: managed accounts query by default until the
@@ -1053,6 +1127,13 @@ fn cached_usage_view(
     provider_id: &str,
     source: Option<&TrayUsageSource>,
 ) -> Option<QuotaView> {
+    if let Some(TrayUsageSource::AgyAccount(id) | TrayUsageSource::KimiAccount(id)) = source {
+        return usage_cache
+            .with_official_account(app_type, id, |quota| {
+                format_subscription_quota(texts, quota)
+            })
+            .flatten();
+    }
     if let Some(TrayUsageSource::ManagedCodex(account_id)) = source {
         // No fallback: a missing account snapshot must not display another
         // account's quota from a provider cache or the CLI subscription cache.
@@ -2231,7 +2312,10 @@ fn collect_snapshots(
     };
 
     let mut snapshots = Vec::new();
-    for app in TRAY_APPS.iter().filter(|app| visible_apps.is_visible(app)) {
+    for app in ordered_tray_apps(settings.app_order.as_deref())
+        .into_iter()
+        .filter(|app| visible_apps.is_visible(app))
+    {
         snapshots.push(collect_app_snapshot(
             app_state, texts, &settings, app, running, &profiles,
         )?);
@@ -2419,7 +2503,10 @@ fn cached_reset_credits(
             usage_cache.with_codex_oauth(account_id, count).flatten()
         }
         TrayUsageSource::Subscription => usage_cache.with_subscription(app_type, count).flatten(),
-        TrayUsageSource::ClaudeAccount(_) | TrayUsageSource::Script => None,
+        TrayUsageSource::ClaudeAccount(_)
+        | TrayUsageSource::AgyAccount(_)
+        | TrayUsageSource::KimiAccount(_)
+        | TrayUsageSource::Script => None,
     }
 }
 
@@ -3431,14 +3518,47 @@ pub fn schedule_tray_refresh(app: &tauri::AppHandle) {
     });
 }
 
-/// 并行刷新每个可见应用"在用的那家"的用量；成功 / 失败结果都通过各
+/// 切换式应用查当前供应商，Antigravity / Kimi 查面板中逐卡展示的账号。
+fn tray_quota_providers(
+    db: &crate::database::Database,
+    app: &AppType,
+) -> Result<Vec<Provider>, AppError> {
+    if matches!(app, AppType::Agy | AppType::Kimi) {
+        return Ok(db
+            .get_all_providers(app.as_str())?
+            .into_values()
+            .filter(|provider| {
+                matches!(
+                    tray_usage_source(app, provider),
+                    Some(
+                        TrayUsageSource::AgyAccount(_)
+                            | TrayUsageSource::KimiAccount(_)
+                            | TrayUsageSource::Subscription
+                    )
+                )
+            })
+            .collect());
+    }
+    if !has_current_provider(app) {
+        return Ok(Vec::new());
+    }
+    let current =
+        crate::mode::current::provider_for(db, app, crate::mode::current::Purpose::InUse)?;
+    match current {
+        Some(id) => Ok(db
+            .get_provider_by_id(&id, app.as_str())?
+            .into_iter()
+            .collect()),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// 并行刷新可见应用的额度的用量；成功 / 失败结果都通过各
 /// command 的 write-through 逻辑写入 `UsageCache`，单次标题更新由
 /// `schedule_tray_refresh` 做合并。内部 10 秒节流防止鼠标悬停反复进出时
 /// 雪崩请求；互斥锁被毒化时以上次状态为准继续推进，不会永久阻塞。
 ///
-/// 刷新面与 `usage_view` 的展示面严格对齐 —— 每次悬停最多发
-/// `TRAY_APPS.len()` 个用量查询；按供应商用量开关查询，Codex 托管账号
-/// 未保存开关时与卡片一致默认启用。
+/// 查询来源与卡片一致；Antigravity / Kimi 按账号查，重复绑定只查询一次。
 pub(crate) async fn refresh_all_usage_in_tray(app: &tauri::AppHandle) {
     use crate::commands::CopilotAuthState;
     use futures::future::join_all;
@@ -3465,46 +3585,32 @@ pub(crate) async fn refresh_all_usage_in_tray(app: &tauri::AppHandle) {
         .unwrap_or_default();
 
     let mut usage_futures = Vec::new();
-
-    for app_type in TRAY_APPS.iter() {
-        if !visible_apps.is_visible(app_type) || !has_current_provider(app_type) {
-            continue;
-        }
-
-        let app_type_str = app_type.as_str();
+    let mut queried_accounts = HashSet::new();
+    for app_type in TRAY_APPS.iter().filter(|app| visible_apps.is_visible(app)) {
         let log_name = app_display_name(app_type);
-
-        // 解析在用的那家；未设置 / 出错都静默跳过，与 create_tray_menu 的行为保持一致。
-        let current_id = match crate::mode::current::provider_for(
-            &app_state.db,
-            app_type,
-            crate::mode::current::Purpose::InUse,
-        ) {
-            Ok(Some(id)) => id,
-            Ok(None) => continue,
-            Err(e) => {
-                log::warn!("[Tray] 读取{log_name}当前供应商失败: {e}");
+        let providers = match tray_quota_providers(&app_state.db, app_type) {
+            Ok(providers) => providers,
+            Err(error) => {
+                log::warn!("[Tray] 读取{log_name}额度查询目标失败: {error}");
                 continue;
             }
         };
-        // 只需当前 provider —— by-id 查询避免把整个 app 的 provider 列表加载
-        // 进内存（每次悬停的热路径）。
-        let current = match app_state.db.get_provider_by_id(&current_id, app_type_str) {
-            Ok(Some(p)) => p,
-            Ok(None) => continue,
-            Err(e) => {
-                log::warn!("[Tray] 读取{log_name}当前供应商失败: {e}");
+        for current in providers {
+            let Some(source) = tray_usage_source(app_type, &current) else {
+                continue;
+            };
+            // 多张卡可以绑定同一个账号；每次只查一次。
+            if source != TrayUsageSource::Script
+                && !queried_accounts.insert((app_type.clone(), source.clone()))
+            {
                 continue;
             }
-        };
-
-        if let Some(source) = tray_usage_source(app_type, &current) {
             let app_clone = app.clone();
             let state = app.state::<AppState>();
             let copilot_state = app.state::<CopilotAuthState>();
             let xai_state = app.state::<crate::commands::XaiOAuthState>();
-            let provider_id = current_id.clone();
-            let app_str = app_type_str.to_string();
+            let provider_id = current.id.clone();
+            let app_str = app_type.as_str().to_string();
             usage_futures.push(async move {
                 let result = match source {
                     TrayUsageSource::ManagedCodex(account_id) => {
@@ -3523,6 +3629,22 @@ pub(crate) async fn refresh_all_usage_in_tray(app: &tauri::AppHandle) {
                             .await
                             .map(|_| ())
                     }
+                    TrayUsageSource::AgyAccount(account_id) => crate::commands::agy_account_quota(
+                        app_clone,
+                        state,
+                        account_id,
+                        app.state::<crate::commands::AgyAccountState>(),
+                    )
+                    .await
+                    .map(|_| ()),
+                    TrayUsageSource::KimiAccount(account_id) => crate::commands::kimi_oauth_quota(
+                        app_clone,
+                        state,
+                        account_id,
+                        app.state::<crate::services::kimi_oauth::KimiOAuthManager>(),
+                    )
+                    .await
+                    .map(|_| ()),
                     TrayUsageSource::Subscription => {
                         crate::commands::get_subscription_quota(app_clone, state, app_str)
                             .await
@@ -3654,6 +3776,180 @@ mod tests {
 
     fn now() -> chrono::DateTime<chrono::Local> {
         chrono::Local::now()
+    }
+
+    #[test]
+    fn custom_app_order_is_shared_with_the_sidebar_and_hidden_apps_stay_hidden() {
+        let saved: Vec<String> = std::iter::once("future-app")
+            .chain(["agy", "codex", "kimi"])
+            .chain(TRAY_APPS.iter().map(AppType::as_str))
+            .map(str::to_string)
+            .collect();
+        let ordered = ordered_tray_apps(Some(&saved));
+        assert_eq!(ordered.len(), TRAY_APPS.len());
+        assert_eq!(
+            &ordered[..3],
+            &[&AppType::Agy, &AppType::Codex, &AppType::Kimi]
+        );
+        let visible: crate::settings::VisibleApps =
+            serde_json::from_value(serde_json::json!({"agy": true, "codex": false, "kimi": true}))
+                .unwrap();
+        let shown: Vec<_> = ordered
+            .into_iter()
+            .filter(|app| visible.is_visible(app))
+            .collect();
+        assert_eq!(&shown[..2], &[&AppType::Agy, &AppType::Kimi]);
+        assert!(!shown.contains(&&AppType::Codex));
+        assert_eq!(
+            ordered_tray_apps(None),
+            TRAY_APPS.iter().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn newly_added_apps_keep_their_default_neighbor_after_custom_ordering() {
+        let saved: Vec<String> = TRAY_APPS
+            .iter()
+            .rev()
+            .filter(|app| **app != AppType::Kimi)
+            .map(|app| app.as_str().to_string())
+            .collect();
+        let ordered = ordered_tray_apps(Some(&saved));
+        let previous = ordered
+            .iter()
+            .position(|app| **app == AppType::Mcode)
+            .unwrap();
+        assert_eq!(*ordered[previous + 1], AppType::Kimi);
+    }
+
+    #[test]
+    fn antigravity_keeps_all_five_independent_quota_windows_and_reset_times() {
+        use crate::services::subscription_agy::*;
+        let names = [
+            TIER_AGY_GEMINI_FIVE_HOUR,
+            TIER_AGY_GEMINI_WEEKLY,
+            TIER_AGY_GEMINI_ARGON_WEEKLY,
+            TIER_AGY_THIRD_PARTY_FIVE_HOUR,
+            TIER_AGY_THIRD_PARTY_WEEKLY,
+        ];
+        let reset = "2026-11-25T08:00:00Z";
+        let tiers = names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| {
+                let mut tier = tier(name, (index + 1) as f64 * 10.0);
+                tier.resets_at = Some(reset.to_string());
+                tier
+            })
+            .collect();
+        let quota = make_quota("agy", true, tiers);
+        for language in ["en", "zh", "zh-TW", "ja", "tr"] {
+            let texts = TrayTexts::from_language(language);
+            let view = format_subscription_quota(&texts, &quota).unwrap();
+            let panel = panel_quota(&texts, &view, now(), None);
+            assert_eq!(panel.lines.len(), 5);
+            for (index, line) in panel.lines.iter().enumerate() {
+                assert_eq!(line.left, Some(90.0 - index as f64 * 10.0));
+                assert_eq!(line.resets_at.as_deref(), Some(reset));
+                assert!(line.text.starts_with(texts.tier_agy[index]));
+            }
+        }
+    }
+
+    #[test]
+    fn kimi_uses_the_official_provider_id_and_api_keys_keep_their_script() {
+        let mut official = provider(
+            serde_json::json!({}),
+            serde_json::json!({
+                "provider": {"type": "kimi", "oauth": {"key": "native-oauth-key"}}
+            }),
+        );
+        official.id = "kimi-work-account".into();
+        assert_eq!(
+            tray_usage_source(&AppType::Kimi, &official),
+            Some(TrayUsageSource::KimiAccount("kimi-work-account".into()))
+        );
+        official.settings_config = serde_json::json!({"provider": {"type": "openai"}});
+        assert_eq!(tray_usage_source(&AppType::Kimi, &official), None);
+        official.meta = serde_json::from_value(serde_json::json!({"usage_script": {
+            "enabled": true, "language": "javascript", "code": "return []"
+        }}))
+        .unwrap();
+        assert_eq!(
+            tray_usage_source(&AppType::Kimi, &official),
+            Some(TrayUsageSource::Script)
+        );
+    }
+
+    #[test]
+    fn antigravity_respects_the_bound_account_and_explicit_usage_toggle() {
+        let mut official = claude_bound_provider(Some(" agy-work "), Some(true));
+        official
+            .meta
+            .as_mut()
+            .unwrap()
+            .auth_binding
+            .as_mut()
+            .unwrap()
+            .auth_provider = Some("agy_oauth".into());
+        let expected = if crate::services::agy_account::keychain::supported() {
+            TrayUsageSource::AgyAccount("agy-work".into())
+        } else {
+            TrayUsageSource::Subscription
+        };
+        assert_eq!(tray_usage_source(&AppType::Agy, &official), Some(expected));
+        official
+            .meta
+            .as_mut()
+            .unwrap()
+            .usage_script
+            .as_mut()
+            .unwrap()
+            .enabled = false;
+        assert_eq!(tray_usage_source(&AppType::Agy, &official), None);
+    }
+
+    #[test]
+    fn official_account_quotas_never_fall_back_to_another_account_or_app() {
+        let cache = UsageCache::new();
+        for (app, source) in [
+            (AppType::Agy, TrayUsageSource::AgyAccount("work".into())),
+            (AppType::Kimi, TrayUsageSource::KimiAccount("work".into())),
+        ] {
+            cache.put_subscription(
+                app.clone(),
+                make_quota(app.as_str(), true, vec![tier(TIER_FIVE_HOUR, 99.0)]),
+            );
+            cache.put_official_account(
+                app.clone(),
+                "personal".into(),
+                make_quota(app.as_str(), true, vec![tier(TIER_FIVE_HOUR, 80.0)]),
+            );
+            assert_eq!(
+                cached_usage_view(&cache, &en(), &app, "card", Some(&source)),
+                None
+            );
+            cache.put_official_account(
+                app.clone(),
+                "work".into(),
+                make_quota(app.as_str(), true, vec![tier(TIER_FIVE_HOUR, 25.0)]),
+            );
+            assert_eq!(
+                title(cached_usage_view(
+                    &cache,
+                    &en(),
+                    &app,
+                    "card",
+                    Some(&source)
+                )),
+                Some(("5-hour 75% left".into(), false))
+            );
+            cache.invalidate_all();
+            assert_eq!(
+                cached_usage_view(&cache, &en(), &app, "card", Some(&source)),
+                None
+            );
+        }
     }
 
     // ─── 基础 ───

@@ -1,3 +1,4 @@
+use crate::app_config::AppType;
 use crate::services::kimi_oauth::{
     KimiLoginPoll, KimiLoginStart, KimiOAuthManager, KimiOAuthStatus, KimiRegion,
 };
@@ -57,10 +58,22 @@ pub async fn kimi_oauth_remove(
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn kimi_oauth_quota(
+    app: tauri::AppHandle,
+    app_state: State<'_, AppState>,
     account_id: String,
     state: State<'_, KimiOAuthManager>,
 ) -> Result<SubscriptionQuota, String> {
-    state.quota(&account_id).await
+    let result = state.quota(&account_id).await;
+    if let Ok(quota) = &result {
+        crate::commands::subscription::cache_official_account_quota(
+            &app,
+            &app_state,
+            AppType::Kimi,
+            &account_id,
+            quota,
+        );
+    }
+    result
 }
 
 /// The account's current official model catalog, for editing its card.

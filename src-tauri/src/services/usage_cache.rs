@@ -16,6 +16,8 @@ pub struct UsageCache {
     codex_oauth: RwLock<HashMap<String, SubscriptionQuota>>,
     /// 绑了账号的 Claude 官方卡，按授权中心的账号 id 存（和 Codex 托管账号一样不进应用级缓存）
     claude_account: RwLock<HashMap<String, SubscriptionQuota>>,
+    /// Antigravity / Kimi 官方卡的额度，按应用和账号隔离。
+    official_account: RwLock<HashMap<(AppType, String), SubscriptionQuota>>,
     script: RwLock<HashMap<(AppType, String), UsageResult>>,
 }
 
@@ -69,6 +71,30 @@ impl UsageCache {
         if let Ok(mut w) = self.script.write() {
             w.insert((app_type, provider_id), result);
         }
+    }
+
+    pub fn put_official_account(
+        &self,
+        app_type: AppType,
+        account_id: String,
+        quota: SubscriptionQuota,
+    ) {
+        if let Ok(mut accounts) = self.official_account.write() {
+            accounts.insert((app_type, account_id), quota);
+        }
+    }
+
+    pub fn with_official_account<R>(
+        &self,
+        app_type: &AppType,
+        account_id: &str,
+        f: impl FnOnce(&SubscriptionQuota) -> R,
+    ) -> Option<R> {
+        self.official_account.read().ok().and_then(|accounts| {
+            accounts
+                .get(&(app_type.clone(), account_id.to_string()))
+                .map(f)
+        })
     }
 
     /// 以借用形式暴露订阅快照，避免托盘每次重建时深拷贝整个 `SubscriptionQuota`。
@@ -133,6 +159,9 @@ impl UsageCache {
             accounts.clear();
         }
         if let Ok(mut accounts) = self.claude_account.write() {
+            accounts.clear();
+        }
+        if let Ok(mut accounts) = self.official_account.write() {
             accounts.clear();
         }
     }
@@ -218,7 +247,14 @@ mod tests {
         cache.put_codex_oauth("account-1".to_string(), fake_quota());
         cache.put_script(AppType::Codex, "provider".to_string(), fake_result());
 
+        cache.put_official_account(AppType::Agy, "account-1".into(), fake_quota());
+        cache.put_official_account(AppType::Kimi, "account-1".into(), fake_quota());
         cache.invalidate_all();
+        for app in [AppType::Agy, AppType::Kimi] {
+            assert!(cache
+                .with_official_account(&app, "account-1", |_| ())
+                .is_none());
+        }
 
         assert!(cache
             .with_subscription(&AppType::Claude, |quota| quota.success)

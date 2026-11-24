@@ -20,10 +20,22 @@ pub async fn agy_account_is_running() -> Result<bool, String> {
 /// 授权中心逐个账号、以及绑了账号的官方卡显示的剩余额度：用该账号自己的令牌直接查，不用先切号。
 #[tauri::command(rename_all = "camelCase")]
 pub async fn agy_account_quota(
+    app: tauri::AppHandle,
+    app_state: tauri::State<'_, crate::store::AppState>,
     account_id: String,
     state: tauri::State<'_, AgyAccountState>,
 ) -> Result<SubscriptionQuota, String> {
-    agy_quota(&state.0, Some(&account_id)).await
+    let result = agy_quota(&state.0, Some(&account_id)).await;
+    if let Ok(quota) = &result {
+        crate::commands::subscription::cache_official_account_quota(
+            &app,
+            &app_state,
+            crate::app_config::AppType::Agy,
+            &account_id,
+            quota,
+        );
+    }
+    result
 }
 
 /// Antigravity 官方登录的额度。指定账号就查它；不指定就查 agy 现在登着的号。都用 CC Switch

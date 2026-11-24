@@ -585,7 +585,7 @@ pub struct AppSettings {
     // ===== 主页面显示的应用 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_apps: Option<VisibleApps>,
-    /// 应用页和侧栏的应用顺序（应用 ID）。缺的应用由前端按默认顺序插回，不认识的忽略
+    /// 应用页、侧栏和托盘的应用顺序（应用 ID）。缺的应用按默认顺序插回，不认识的忽略
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_order: Option<Vec<String>>,
 

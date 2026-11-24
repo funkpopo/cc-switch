@@ -17,6 +17,12 @@ type UsageCacheUpdatedPayload =
       kind: "subscription";
       appType: AppId;
       data: SubscriptionQuota;
+    }
+  | {
+      kind: "account";
+      appType: "agy" | "kimi";
+      accountId: string;
+      data: SubscriptionQuota;
     };
 
 /**
@@ -36,6 +42,11 @@ export function useUsageCacheBridge() {
     } else if (payload.kind === "subscription") {
       queryClient.setQueryData<SubscriptionQuota>(
         subscriptionKeys.quota(payload.appType),
+        payload.data,
+      );
+    } else if (payload.kind === "account") {
+      queryClient.setQueryData<SubscriptionQuota>(
+        [`${payload.appType}_oauth`, "quota", payload.accountId],
         payload.data,
       );
     }

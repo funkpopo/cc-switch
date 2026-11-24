@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -14,6 +15,7 @@ import {
   SHOW_EVENT,
   trayPanelApi,
   type PanelPlacement,
+  type PanelRow,
   type PanelTexts,
   type TrayPanelState,
 } from "@/tray-panel/api";
@@ -167,6 +169,80 @@ describe("TrayPanel window layout", () => {
     delete document.documentElement.dataset.glass;
     delete document.documentElement.dataset.layout;
   });
+
+  it.each(["agy", "kimi"] as const)(
+    "shows each %s account and every quota window without opening its submenu",
+    async (appId) => {
+      const labels = [
+        "Gemini 5-hour",
+        "Gemini weekly",
+        "Argon weekly",
+        "Claude/GPT 5-hour",
+        "Claude/GPT weekly",
+      ];
+      const accountRow = (
+        id: string,
+        name: string,
+        left: number,
+      ): PanelRow => ({
+        kind: "provider",
+        id: `nav:app:${appId}:card:${id}`,
+        text: name,
+        checked: false,
+        enabled: true,
+        provider: {
+          name,
+          hint: null,
+          icon: null,
+          iconColor: null,
+          quota: {
+            lines: labels.map((label) => ({
+              text: `${label} ${left}% left`,
+              left,
+              warn: false,
+              resetsAt: new Date(
+                Date.now() + 3 * 24 * 60 * 60_000,
+              ).toISOString(),
+              emphasis: null,
+            })),
+            note: null,
+            resetCredits: null,
+          },
+        },
+      });
+      vi.mocked(trayPanelApi.state).mockResolvedValue({
+        ...state,
+        apps: [
+          {
+            ...state.apps[0],
+            app: appId,
+            name: appId,
+            current: null,
+            rows: [
+              accountRow("work", "Work account", 70),
+              accountRow("personal", "Personal account", 40),
+            ],
+          },
+        ],
+      });
+      vi.mocked(trayPanelApi.placement).mockResolvedValue(windows);
+      renderPanel();
+      await screen.findByText("Work account");
+      const app = document.querySelector(
+        `[data-app-row="${appId}"]`,
+      )! as HTMLElement;
+      expect(within(app).getByText("Personal account")).toBeInTheDocument();
+      for (const label of labels) {
+        expect(within(app).getByText(`${label} 70% left`)).toBeInTheDocument();
+        expect(within(app).getByText(`${label} 40% left`)).toBeInTheDocument();
+      }
+      expect(document.querySelector(".tp-card")).toHaveStyle({
+        maxHeight: "620px",
+      });
+      expect(within(app).getAllByTitle(/^Resets in /)).toHaveLength(10);
+      expect(document.querySelector(".tp-sub")).toBeNull();
+    },
+  );
 
   it("colors only the balance amount green, like the provider card", async () => {
     vi.mocked(trayPanelApi.state).mockResolvedValue({

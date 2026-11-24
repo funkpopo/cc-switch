@@ -83,6 +83,7 @@ pub async fn save_settings(
             != existing.codex_stack_subagent_reasoning_effort
         || merged.codex_stack_auto_review_model != existing.codex_stack_auto_review_model;
     let tray_style_changed = merged.native_tray_menu != existing.native_tray_menu;
+    let app_order_changed = merged.app_order != existing.app_order;
     let visible_apps_changed = merged.visible_apps.clone().unwrap_or_default()
         != existing.visible_apps.clone().unwrap_or_default();
     crate::settings::update_settings(merged).map_err(|e| e.to_string())?;
@@ -90,9 +91,9 @@ pub async fn save_settings(
     // 原生托盘菜单 / 托盘面板当场切换，不用重启。
     if tray_style_changed {
         crate::tray::apply_tray_style(&app);
-    } else if visible_apps_changed {
+    } else if visible_apps_changed || app_order_changed {
         // 托盘只列应用页里开着的应用：不管从哪条路径保存（侧栏「从侧栏隐藏」不会再调
-        // update_tray_menu），开关一变就重建托盘。
+        // update_tray_menu），开关或应用顺序一变就重建托盘。
         crate::tray::refresh_tray_menu(&app);
     }
 
